@@ -2,7 +2,10 @@ const Trip = require("../models/Trip");
 const Vehicle = require("../models/Vehicle");
 const Driver = require("../models/Driver");
 
-// Create Trip
+
+// ============================
+// 1️⃣ Create Trip (Draft Only)
+// ============================
 exports.createTrip = async (req, res) => {
   try {
     const { vehicle, driver, cargoWeight, origin, destination } = req.body;
@@ -14,53 +17,89 @@ exports.createTrip = async (req, res) => {
       return res.status(404).json({ message: "Vehicle or Driver not found" });
     }
 
-    // 🚛 Capacity Check
+    // Capacity Check
     if (cargoWeight > selectedVehicle.maxCapacity) {
       return res.status(400).json({ message: "Cargo exceeds vehicle capacity" });
     }
 
-    // 🚦 Vehicle Availability Check
-    if (selectedVehicle.status !== "Available") {
-      return res.status(400).json({ message: "Vehicle not available" });
-    }
-
-    // 👨‍✈️ Driver Availability Check
-    if (selectedDriver.status !== "Available") {
-      return res.status(400).json({ message: "Driver not available" });
-    }
-
-    // 📅 License Expiry Check
+    // License Expiry Check
     if (new Date(selectedDriver.licenseExpiry) < new Date()) {
       return res.status(400).json({ message: "Driver license expired" });
     }
 
+    // IMPORTANT: Draft only
     const trip = await Trip.create({
       vehicle,
       driver,
       cargoWeight,
       origin,
       destination,
-      status: "Dispatched",
+      status: "Draft",
       startOdometer: selectedVehicle.odometer
     });
 
-    // 🔄 Auto Status Change
-    selectedVehicle.status = "OnTrip";
-    selectedDriver.status = "OnTrip";
-
-    await selectedVehicle.save();
-    await selectedDriver.save();
-
-    res.status(201).json(trip);
+    res.status(201).json({
+      message: "Trip created in Draft mode",
+      trip
+    });
 
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
 };
-// Complete Trip
+
+
+// ============================
+// 2️⃣ Dispatch Trip
+// ============================
+exports.dispatchTrip = async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.id);
+
+    if (!trip) {
+      return res.status(404).json({ message: "Trip not found" });
+    }
+
+    if (trip.status !== "Draft") {
+      return res.status(400).json({ message: "Only draft trips can be dispatched" });
+    }
+
+    const vehicle = await Vehicle.findById(trip.vehicle);
+    const driver = await Driver.findById(trip.driver);
+
+    if (vehicle.status !== "Available") {
+      return res.status(400).json({ message: "Vehicle not available" });
+    }
+
+    if (driver.status !== "Available") {
+      return res.status(400).json({ message: "Driver not available" });
+    }
+
+    trip.status = "Dispatched";
+    vehicle.status = "OnTrip";
+    driver.status = "OnTrip";
+
+    await trip.save();
+    await vehicle.save();
+    await driver.save();
+
+    res.json({
+      message: "Trip dispatched successfully",
+      trip
+    });
+
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+
+// ============================
+// 3️⃣ Complete Trip
+// ============================
 exports.completeTrip = async (req, res) => {
   try {
-    const { endOdometer } = req.body;
+    const { endOdometer, revenue } = req.body;
 
     const trip = await Trip.findById(req.params.id);
     if (!trip) {
@@ -76,11 +115,9 @@ exports.completeTrip = async (req, res) => {
 
     trip.status = "Completed";
     trip.endOdometer = endOdometer;
+    trip.revenue = revenue || 0;
 
-    // Update vehicle odometer
     vehicle.odometer = endOdometer;
-
-    // Make both available again
     vehicle.status = "Available";
     driver.status = "Available";
 
@@ -88,13 +125,20 @@ exports.completeTrip = async (req, res) => {
     await vehicle.save();
     await driver.save();
 
-    res.json({ message: "Trip completed successfully", trip });
+    res.json({
+      message: "Trip completed successfully",
+      trip
+    });
 
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
 };
-// Cancel Trip
+
+
+// ============================
+// 4️⃣ Cancel Trip
+// ============================
 exports.cancelTrip = async (req, res) => {
   try {
     const trip = await Trip.findById(req.params.id);
@@ -119,7 +163,10 @@ exports.cancelTrip = async (req, res) => {
     await vehicle.save();
     await driver.save();
 
-    res.json({ message: "Trip cancelled successfully", trip });
+    res.json({
+      message: "Trip cancelled successfully",
+      trip
+    });
 
   } catch (error) {
     res.status(400).json({ message: error.message });
